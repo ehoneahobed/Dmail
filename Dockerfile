@@ -1,5 +1,5 @@
 # Stage 1: Build Go daemon
-FROM golang:1.23-alpine AS go-builder
+FROM golang:1.25-alpine AS go-builder
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
@@ -15,7 +15,7 @@ COPY frontend/ .
 RUN npm run build
 
 # Stage 3: Runtime
-FROM alpine:3.19
+FROM alpine:3.20
 RUN apk add --no-cache ca-certificates
 WORKDIR /app
 
@@ -24,9 +24,8 @@ COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
 EXPOSE 7777
 
-ENV DATA_DIR=/data
-ENV JWT_SECRET=""
-ENV PORT=7777
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:7777/api/v1/status || exit 1
 
 VOLUME ["/data"]
 
