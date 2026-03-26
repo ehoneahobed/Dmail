@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -198,6 +199,7 @@ func (s *Store) SaveMessageForUser(userID string, m *Message) error {
 }
 
 // ListMessagesForUser returns messages for a specific user in a folder.
+// The returned message IDs have the userID: prefix stripped so the frontend gets clean IDs.
 func (s *Store) ListMessagesForUser(userID, folder string) ([]Message, error) {
 	rows, err := s.db.Query(
 		`SELECT id, folder, sender_pubkey, recipient_pubkey, subject, body, timestamp, is_read
@@ -209,11 +211,16 @@ func (s *Store) ListMessagesForUser(userID, folder string) ([]Message, error) {
 	}
 	defer rows.Close()
 
+	prefix := userID + ":"
 	var msgs []Message
 	for rows.Next() {
 		var m Message
 		if err := rows.Scan(&m.ID, &m.Folder, &m.SenderPubkey, &m.RecipientPubkey, &m.Subject, &m.Body, &m.Timestamp, &m.IsRead); err != nil {
 			return nil, err
+		}
+		// Strip the userID: prefix so the frontend gets clean IDs.
+		if strings.HasPrefix(m.ID, prefix) {
+			m.ID = m.ID[len(prefix):]
 		}
 		msgs = append(msgs, m)
 	}

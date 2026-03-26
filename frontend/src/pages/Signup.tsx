@@ -16,6 +16,7 @@ export default function Signup({ onLogin }: Props) {
   const [loading, setLoading] = useState(false)
   const [mnemonic, setMnemonic] = useState<string | null>(null)
   const [address, setAddress] = useState<string | null>(null)
+  const [pendingToken, setPendingToken] = useState<string | null>(null)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -23,8 +24,8 @@ export default function Signup({ onLogin }: Props) {
     setLoading(true)
     try {
       const res = await api.signup(username, password, email)
-      saveToken(res.token)
-      saveAddress(res.address)
+      // Don't save token yet — wait until user confirms they saved the mnemonic.
+      setPendingToken(res.token)
       setMnemonic(res.mnemonic)
       setAddress(res.address)
     } catch (err: any) {
@@ -32,6 +33,14 @@ export default function Signup({ onLogin }: Props) {
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleConfirmMnemonic = () => {
+    if (pendingToken && address) {
+      saveToken(pendingToken)
+      saveAddress(address)
+    }
+    onLogin()
   }
 
   // After signup, show the mnemonic once.
@@ -61,7 +70,7 @@ export default function Signup({ onLogin }: Props) {
         <button
           className="primary"
           style={{ marginTop: '1.5rem' }}
-          onClick={onLogin}
+          onClick={handleConfirmMnemonic}
         >
           I've saved my recovery phrase — Enter Dmail
         </button>

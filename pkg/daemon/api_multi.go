@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/ehoneahobed/dmail/pkg/auth"
 	dmcrypto "github.com/ehoneahobed/dmail/pkg/crypto"
+	"github.com/ehoneahobed/dmail/pkg/names"
 	"github.com/ehoneahobed/dmail/pkg/store"
 	"github.com/google/uuid"
 )
@@ -417,6 +419,7 @@ func (d *MultiTenantDaemon) handleMTDeleteContact(w http.ResponseWriter, r *http
 }
 
 func (d *MultiTenantDaemon) handleMTRegisterName(w http.ResponseWriter, r *http.Request) {
+	userID := getUserID(r)
 	var req struct {
 		Name string `json:"name"`
 	}
@@ -428,9 +431,59 @@ func (d *MultiTenantDaemon) handleMTRegisterName(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	// Name registration uses the service keypair in multi-tenant mode for simplicity.
-	// A full implementation would use the user's keypair from their session.
-	writeError(w, http.StatusNotImplemented, "name registration not yet available in multi-tenant mode")
+
+	session := d.Sessions.Get(userID)
+	if session == nil {
+		writeError(w, http.StatusUnauthorized, "session expired, please login again")
+		return
+	}
+
+	if err := names.ValidateName(req.Name); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	kp := &dmcrypto.KeyPair{
+		PublicKey:  session.PublicKey,
+		PrivateKey: session.PrivateKey,
+	}
+
+	// Build and register name in background (PoW takes ~10 min).
+	d.pendingPoW.Add(1)
+	d.wg.Add(1)
+	go func() {
+		defer d.wg.Done()
+		defer d.pendingPoW.Add(-1)
+
+		rec, err := names.BuildNameRecord(req.Name, kp)
+		if err != nil {
+			log.Printf("ERROR build name record for %s: %v", req.Name, err)
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		if err := d.Node.RegisterName(ctx, rec); err != nil {
+			log.Printf("ERROR register name %s on DHT: %v", req.Name, err)
+			return
+		}
+
+		raw, _ := names.Marshal(rec)
+		entry := &store.NameEntry{
+			Name:      req.Name,
+			Pubkey:    dmcrypto.Address(kp.PublicKey),
+			Timestamp: int64(rec.Timestamp),
+			RawRecord: raw,
+			IsMine:    true,
+		}
+		d.Store.SaveName(entry)
+		log.Printf("name %s.dmail registered for user %s", req.Name, userID)
+	}()
+
+	writeJSON(w, http.StatusAccepted, map[string]string{
+		"status": "registration started, PoW computation in progress",
+	})
 }
 
 func (d *MultiTenantDaemon) handleMTResolveName(w http.ResponseWriter, r *http.Request) {
