@@ -1,6 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { api, Contact, Identity } from '../api'
+import FormattingToolbar from '../components/FormattingToolbar'
+import MarkdownRenderer from '../components/MarkdownRenderer'
 
 interface Props {
   contacts: Contact[]
@@ -17,6 +19,8 @@ export default function Compose({ contacts, identity }: Props) {
   const [sending, setSending] = useState(false)
   const [error, setError] = useState('')
   const [sent, setSent] = useState(false)
+  const [showPreview, setShowPreview] = useState(false)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const replyId = searchParams.get('reply') || undefined
 
@@ -150,13 +154,33 @@ export default function Compose({ contacts, identity }: Props) {
       </div>
 
       <div className="field">
-        <label>Body</label>
-        <textarea
-          placeholder="Write your message..."
-          value={body}
-          onChange={e => setBody(e.target.value)}
-          rows={8}
-        />
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <label>Body</label>
+          <button
+            type="button"
+            className="secondary"
+            style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
+            onClick={() => setShowPreview(!showPreview)}
+          >
+            {showPreview ? 'Edit' : 'Preview'}
+          </button>
+        </div>
+        {showPreview ? (
+          <div className="preview-box">
+            <MarkdownRenderer content={body || '*Nothing to preview*'} />
+          </div>
+        ) : (
+          <>
+            <FormattingToolbar textareaRef={textareaRef} value={body} onChange={setBody} />
+            <textarea
+              ref={textareaRef}
+              placeholder="Write your message... (Markdown supported)"
+              value={body}
+              onChange={e => setBody(e.target.value)}
+              rows={8}
+            />
+          </>
+        )}
       </div>
 
       {sending && (

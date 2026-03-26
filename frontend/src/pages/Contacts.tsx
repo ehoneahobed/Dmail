@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { api, Contact } from '../api'
+import Avatar from '../components/Avatar'
 
 interface Props {
   contacts: Contact[]
@@ -81,9 +82,12 @@ export default function Contacts({ contacts, onUpdate }: Props) {
         <ul className="contacts-list">
           {contacts.map(c => (
             <li key={c.pubkey} className="contact-item">
-              <div>
-                <div className="name">{c.petname}</div>
-                <div className="key">{c.pubkey}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <Avatar address={c.pubkey} size={36} />
+                <div>
+                  <div className="name">{c.petname}</div>
+                  <div className="key">{c.pubkey}</div>
+                </div>
               </div>
               <button className="danger" onClick={() => handleDelete(c.pubkey)}>
                 Remove

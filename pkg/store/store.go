@@ -15,14 +15,17 @@ type Store struct {
 
 // Message represents a stored message.
 type Message struct {
-	ID             string `json:"id"`
-	Folder         string `json:"folder"`
-	SenderPubkey   string `json:"sender"`
+	ID              string `json:"id"`
+	Folder          string `json:"folder"`
+	SenderPubkey    string `json:"sender"`
 	RecipientPubkey string `json:"recipient"`
-	Subject        string `json:"subject"`
-	Body           string `json:"body"`
-	Timestamp      int64  `json:"timestamp"`
-	IsRead         bool   `json:"is_read"`
+	Subject         string `json:"subject"`
+	Body            string `json:"body"`
+	Timestamp       int64  `json:"timestamp"`
+	IsRead          bool   `json:"is_read"`
+	ReplyToID       string `json:"reply_to_id,omitempty"`
+	ThreadID        string `json:"thread_id,omitempty"`
+	Status          string `json:"status,omitempty"`
 }
 
 // NameEntry represents a registered .dmail name.
@@ -65,10 +68,14 @@ func (s *Store) migrate() error {
 		subject TEXT NOT NULL,
 		body TEXT NOT NULL,
 		timestamp INTEGER NOT NULL,
-		is_read INTEGER NOT NULL DEFAULT 0
+		is_read INTEGER NOT NULL DEFAULT 0,
+		reply_to_id TEXT NOT NULL DEFAULT '',
+		thread_id TEXT NOT NULL DEFAULT '',
+		status TEXT NOT NULL DEFAULT ''
 	);
 	CREATE INDEX IF NOT EXISTS idx_messages_folder ON messages(folder);
 	CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
+	CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(thread_id);
 
 	CREATE TABLE IF NOT EXISTS contacts (
 		pubkey TEXT PRIMARY KEY,
@@ -89,16 +96,61 @@ func (s *Store) migrate() error {
 		is_mine INTEGER NOT NULL DEFAULT 0
 	);
 	`
-	_, err := s.db.Exec(schema)
-	return err
+	if _, err := s.db.Exec(schema); err != nil {
+		return err
+	}
+
+	// Add columns if they don't exist (for existing databases).
+	alters := []string{
+		"ALTER TABLE messages ADD COLUMN reply_to_id TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE messages ADD COLUMN thread_id TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE messages ADD COLUMN status TEXT NOT NULL DEFAULT ''",
+	}
+	for _, q := range alters {
+		s.db.Exec(q) // ignore errors — column may already exist
+	}
+
+	// Create FTS5 virtual table for full-text search.
+	fts := `
+	CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+		id UNINDEXED, subject, body, content='messages', content_rowid='rowid'
+	);
+
+	CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
+		INSERT INTO messages_fts(rowid, id, subject, body) VALUES (new.rowid, new.id, new.subject, new.body);
+	END;
+
+	CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
+		INSERT INTO messages_fts(messages_fts, rowid, id, subject, body) VALUES('delete', old.rowid, old.id, old.subject, old.body);
+	END;
+
+	CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
+		INSERT INTO messages_fts(messages_fts, rowid, id, subject, body) VALUES('delete', old.rowid, old.id, old.subject, old.body);
+		INSERT INTO messages_fts(rowid, id, subject, body) VALUES (new.rowid, new.id, new.subject, new.body);
+	END;
+	`
+	if _, err := s.db.Exec(fts); err != nil {
+		return err
+	}
+
+	// Rebuild FTS index from existing data (idempotent).
+	s.db.Exec("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
+
+	return nil
 }
 
 // SaveMessage inserts or replaces a message.
 func (s *Store) SaveMessage(m *Message) error {
+	if m.ThreadID == "" && m.ReplyToID != "" {
+		m.ThreadID = m.ReplyToID
+	}
+	if m.ThreadID == "" {
+		m.ThreadID = m.ID
+	}
 	_, err := s.db.Exec(
-		`INSERT OR REPLACE INTO messages (id, folder, sender_pubkey, recipient_pubkey, subject, body, timestamp, is_read)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		m.ID, m.Folder, m.SenderPubkey, m.RecipientPubkey, m.Subject, m.Body, m.Timestamp, m.IsRead,
+		`INSERT OR REPLACE INTO messages (id, folder, sender_pubkey, recipient_pubkey, subject, body, timestamp, is_read, reply_to_id, thread_id, status)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		m.ID, m.Folder, m.SenderPubkey, m.RecipientPubkey, m.Subject, m.Body, m.Timestamp, m.IsRead, m.ReplyToID, m.ThreadID, m.Status,
 	)
 	return err
 }
@@ -107,9 +159,9 @@ func (s *Store) SaveMessage(m *Message) error {
 func (s *Store) GetMessage(id string) (*Message, error) {
 	m := &Message{}
 	err := s.db.QueryRow(
-		`SELECT id, folder, sender_pubkey, recipient_pubkey, subject, body, timestamp, is_read
+		`SELECT id, folder, sender_pubkey, recipient_pubkey, subject, body, timestamp, is_read, reply_to_id, thread_id, status
 		 FROM messages WHERE id = ?`, id,
-	).Scan(&m.ID, &m.Folder, &m.SenderPubkey, &m.RecipientPubkey, &m.Subject, &m.Body, &m.Timestamp, &m.IsRead)
+	).Scan(&m.ID, &m.Folder, &m.SenderPubkey, &m.RecipientPubkey, &m.Subject, &m.Body, &m.Timestamp, &m.IsRead, &m.ReplyToID, &m.ThreadID, &m.Status)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -119,7 +171,7 @@ func (s *Store) GetMessage(id string) (*Message, error) {
 // ListMessages returns messages in the given folder, ordered by timestamp desc.
 func (s *Store) ListMessages(folder string) ([]Message, error) {
 	rows, err := s.db.Query(
-		`SELECT id, folder, sender_pubkey, recipient_pubkey, subject, body, timestamp, is_read
+		`SELECT id, folder, sender_pubkey, recipient_pubkey, subject, body, timestamp, is_read, reply_to_id, thread_id, status
 		 FROM messages WHERE folder = ? ORDER BY timestamp DESC`, folder,
 	)
 	if err != nil {
@@ -130,7 +182,7 @@ func (s *Store) ListMessages(folder string) ([]Message, error) {
 	var msgs []Message
 	for rows.Next() {
 		var m Message
-		if err := rows.Scan(&m.ID, &m.Folder, &m.SenderPubkey, &m.RecipientPubkey, &m.Subject, &m.Body, &m.Timestamp, &m.IsRead); err != nil {
+		if err := rows.Scan(&m.ID, &m.Folder, &m.SenderPubkey, &m.RecipientPubkey, &m.Subject, &m.Body, &m.Timestamp, &m.IsRead, &m.ReplyToID, &m.ThreadID, &m.Status); err != nil {
 			return nil, err
 		}
 		msgs = append(msgs, m)
@@ -285,6 +337,84 @@ func (s *Store) GetMyNames() ([]NameEntry, error) {
 		entries = append(entries, n)
 	}
 	return entries, rows.Err()
+}
+
+// CountUnread returns the number of unread messages in a folder.
+func (s *Store) CountUnread(folder string) (int, error) {
+	var count int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM messages WHERE folder = ? AND is_read = 0`, folder).Scan(&count)
+	return count, err
+}
+
+// SearchMessages performs full-text search on message subjects and bodies.
+func (s *Store) SearchMessages(query string, limit int) ([]Message, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.db.Query(
+		`SELECT m.id, m.folder, m.sender_pubkey, m.recipient_pubkey, m.subject, m.body, m.timestamp, m.is_read, m.reply_to_id, m.thread_id, m.status
+		 FROM messages m
+		 JOIN messages_fts f ON m.id = f.id
+		 WHERE messages_fts MATCH ?
+		 ORDER BY m.timestamp DESC LIMIT ?`,
+		query, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var msgs []Message
+	for rows.Next() {
+		var m Message
+		if err := rows.Scan(&m.ID, &m.Folder, &m.SenderPubkey, &m.RecipientPubkey, &m.Subject, &m.Body, &m.Timestamp, &m.IsRead, &m.ReplyToID, &m.ThreadID, &m.Status); err != nil {
+			return nil, err
+		}
+		msgs = append(msgs, m)
+	}
+	return msgs, rows.Err()
+}
+
+// GetThread returns all messages in a thread, ordered chronologically.
+func (s *Store) GetThread(messageID string) ([]Message, error) {
+	// First find the thread_id for this message.
+	var threadID string
+	err := s.db.QueryRow(`SELECT thread_id FROM messages WHERE id = ?`, messageID).Scan(&threadID)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if threadID == "" {
+		threadID = messageID
+	}
+
+	rows, err := s.db.Query(
+		`SELECT id, folder, sender_pubkey, recipient_pubkey, subject, body, timestamp, is_read, reply_to_id, thread_id, status
+		 FROM messages WHERE thread_id = ? ORDER BY timestamp ASC`,
+		threadID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var msgs []Message
+	for rows.Next() {
+		var m Message
+		if err := rows.Scan(&m.ID, &m.Folder, &m.SenderPubkey, &m.RecipientPubkey, &m.Subject, &m.Body, &m.Timestamp, &m.IsRead, &m.ReplyToID, &m.ThreadID, &m.Status); err != nil {
+			return nil, err
+		}
+		msgs = append(msgs, m)
+	}
+	return msgs, rows.Err()
+}
+
+// UpdateMessageStatus updates the delivery status of a message.
+func (s *Store) UpdateMessageStatus(id, status string) error {
+	_, err := s.db.Exec(`UPDATE messages SET status = ? WHERE id = ?`, status, id)
+	return err
 }
 
 // Close closes the database.

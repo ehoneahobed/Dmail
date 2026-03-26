@@ -1,6 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, Message } from '../api'
+import Avatar from '../components/Avatar'
+import SearchBar from '../components/SearchBar'
+import DeliveryStatus from '../components/DeliveryStatus'
 
 interface Props {
   folder: string
@@ -18,6 +21,7 @@ function formatTime(ts: number): string {
 
 export default function Inbox({ folder, resolveName }: Props) {
   const [messages, setMessages] = useState<Message[]>([])
+  const [searchResults, setSearchResults] = useState<Message[] | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const navigate = useNavigate()
@@ -25,6 +29,7 @@ export default function Inbox({ folder, resolveName }: Props) {
   useEffect(() => {
     setLoading(true)
     setError('')
+    setSearchResults(null)
     api
       .listMessages(folder)
       .then(setMessages)
@@ -32,7 +37,19 @@ export default function Inbox({ folder, resolveName }: Props) {
       .finally(() => setLoading(false))
   }, [folder])
 
+  const handleSearch = useCallback((query: string) => {
+    if (!query) {
+      setSearchResults(null)
+      return
+    }
+    api
+      .searchMessages(query)
+      .then(setSearchResults)
+      .catch(() => setSearchResults([]))
+  }, [])
+
   const title = folder.charAt(0).toUpperCase() + folder.slice(1)
+  const displayMessages = searchResults !== null ? searchResults : messages
 
   return (
     <div>
@@ -43,31 +60,55 @@ export default function Inbox({ folder, resolveName }: Props) {
         </button>
       </div>
 
+      <SearchBar onSearch={handleSearch} />
+
       {error && <div className="error-banner">{error}</div>}
 
       {loading ? (
         <div className="empty-state">
           <div className="spinner" style={{ margin: '0 auto' }} />
         </div>
-      ) : messages.length === 0 ? (
+      ) : displayMessages.length === 0 ? (
         <div className="empty-state">
-          <p>No messages in {folder}.</p>
+          <p>{searchResults !== null ? 'No results found.' : `No messages in ${folder}.`}</p>
         </div>
       ) : (
         <ul className="message-list">
-          {messages.map(msg => (
-            <li
-              key={msg.id}
-              className={`message-item ${!msg.is_read && folder === 'inbox' ? 'unread' : ''}`}
-              onClick={() => navigate(`/message/${msg.id}`)}
-            >
-              <span className="sender">
-                {folder === 'sent' ? resolveName(msg.recipient) : resolveName(msg.sender)}
-              </span>
-              <span className="subject">{msg.subject}</span>
-              <span className="time">{formatTime(msg.timestamp)}</span>
-            </li>
-          ))}
+          {displayMessages.map(msg => {
+            const displayAddr = folder === 'sent' ? msg.recipient : msg.sender
+            return (
+              <li
+                key={msg.id}
+                className={`message-item ${!msg.is_read && folder === 'inbox' ? 'unread' : ''}`}
+                onClick={() => navigate(`/message/${msg.id}`)}
+              >
+                <Avatar address={displayAddr} size={36} />
+                <span className="sender">
+                  {resolveName(displayAddr)}
+                </span>
+                <span className="subject">
+                  {msg.subject}
+                  {msg.thread_id && msg.thread_id !== msg.id && (
+                    <button
+                      className="thread-badge"
+                      onClick={e => {
+                        e.stopPropagation()
+                        navigate(`/thread/${msg.thread_id}`)
+                      }}
+                    >
+                      Thread
+                    </button>
+                  )}
+                </span>
+                <span className="time">
+                  {folder === 'sent' && msg.status && (
+                    <DeliveryStatus status={msg.status} />
+                  )}
+                  {formatTime(msg.timestamp)}
+                </span>
+              </li>
+            )
+          })}
         </ul>
       )}
     </div>

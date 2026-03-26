@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go version 2>&1)",
+      "Bash(protoc --version 2>&1)",
+      "Bash(go get filippo.io/edwards25519 2>&1)",
+      "Bash(go get github.com/google/uuid 2>&1)",
+      "Bash(go build ./... 2>&1)",
+      "Bash(go test ./pkg/pow/ -v 2>&1)",
+      "Bash(go test ./pkg/crypto/ -v 2>&1)",
+      "Bash(go test ./... 2>&1)",
+      "Bash(go get github.com/libp2p/go-libp2p github.com/libp2p/go-libp2p-kad-dht 2>&1)",
+      "Bash(node --version && npm --version 2>&1)",
+      "Bash(cd /Users/ehoneahobed/Work/Dmail/frontend && npm install 2>&1 | tail -5)",
+      "Bash(npx tsc --noEmit 2>&1)",
+      "Bash(CGO_ENABLED=1 go test ./... -count=1 2>&1)"
+    ]
+  }
+}

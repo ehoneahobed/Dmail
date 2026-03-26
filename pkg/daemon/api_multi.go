@@ -48,11 +48,17 @@ func (d *MultiTenantDaemon) NewMultiTenantHTTPHandler(staticDir string) http.Han
 	mux.HandleFunc("GET /api/v1/status", d.handleMTStatus)
 
 	// Protected endpoints.
+	mux.HandleFunc("GET /api/v1/messages/unread-count", d.requireAuth(d.handleMTUnreadCount))
+	mux.HandleFunc("GET /api/v1/messages/search", d.requireAuth(d.handleMTSearchMessages))
+	mux.HandleFunc("GET /api/v1/messages/thread/{id}", d.requireAuth(d.handleMTGetThread))
 	mux.HandleFunc("GET /api/v1/messages", d.requireAuth(d.handleMTListMessages))
 	mux.HandleFunc("GET /api/v1/messages/{id}", d.requireAuth(d.handleMTGetMessage))
 	mux.HandleFunc("POST /api/v1/messages/send", d.requireAuth(d.handleMTSendMessage))
 	mux.HandleFunc("PUT /api/v1/messages/{id}/read", d.requireAuth(d.handleMTMarkRead))
 	mux.HandleFunc("DELETE /api/v1/messages/{id}", d.requireAuth(d.handleMTDeleteMessage))
+
+	// User directory.
+	mux.HandleFunc("GET /api/v1/users", d.requireAuth(d.handleMTListUsers))
 
 	mux.HandleFunc("GET /api/v1/contacts", d.requireAuth(d.handleMTListContacts))
 	mux.HandleFunc("POST /api/v1/contacts", d.requireAuth(d.handleMTSaveContact))
@@ -360,6 +366,17 @@ func (d *MultiTenantDaemon) handleMTMarkRead(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
+	// Propagate read receipt: if the sender is a local user, update their sent copy.
+	msg, _ := d.Store.GetMessage(scopedID)
+	if msg != nil {
+		senderUser, _ := d.Store.GetUserByPubkey(msg.SenderPubkey)
+		if senderUser != nil {
+			// Update the sender's sent copy status to "read".
+			d.Store.UpdateMessageStatusForUser(senderUser.ID, id, "read")
+		}
+	}
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -511,4 +528,78 @@ func (d *MultiTenantDaemon) handleMTMyNames(w http.ResponseWriter, r *http.Reque
 		entries = []store.NameEntry{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"names": entries})
+}
+
+func (d *MultiTenantDaemon) handleMTUnreadCount(w http.ResponseWriter, r *http.Request) {
+	userID := getUserID(r)
+	folder := r.URL.Query().Get("folder")
+	if folder == "" {
+		folder = "inbox"
+	}
+	count, err := d.Store.CountUnreadForUser(userID, folder)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"count": count})
+}
+
+func (d *MultiTenantDaemon) handleMTSearchMessages(w http.ResponseWriter, r *http.Request) {
+	userID := getUserID(r)
+	q := r.URL.Query().Get("q")
+	if q == "" {
+		writeJSON(w, http.StatusOK, map[string]any{"messages": []store.Message{}})
+		return
+	}
+	msgs, err := d.Store.SearchMessagesForUser(userID, q, 50)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if msgs == nil {
+		msgs = []store.Message{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"messages": msgs})
+}
+
+func (d *MultiTenantDaemon) handleMTGetThread(w http.ResponseWriter, r *http.Request) {
+	userID := getUserID(r)
+	id := r.PathValue("id")
+	msgs, err := d.Store.GetThreadForUser(userID, id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if msgs == nil {
+		msgs = []store.Message{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"messages": msgs})
+}
+
+func (d *MultiTenantDaemon) handleMTListUsers(w http.ResponseWriter, r *http.Request) {
+	users, err := d.Store.ListUsers()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if users == nil {
+		users = []store.User{}
+	}
+	// Return only public fields.
+	type publicUser struct {
+		ID        string `json:"id"`
+		Username  string `json:"username"`
+		Pubkey    string `json:"pubkey"`
+		CreatedAt int64  `json:"created_at"`
+	}
+	var result []publicUser
+	for _, u := range users {
+		result = append(result, publicUser{
+			ID:        u.ID,
+			Username:  u.Username,
+			Pubkey:    u.Pubkey,
+			CreatedAt: u.CreatedAt,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"users": result})
 }

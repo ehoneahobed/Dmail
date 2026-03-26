@@ -44,6 +44,16 @@ export interface Message {
   body: string
   timestamp: number
   is_read: boolean
+  reply_to_id?: string
+  thread_id?: string
+  status?: string
+}
+
+export interface User {
+  id: string
+  username: string
+  pubkey: string
+  created_at: number
 }
 
 export interface Contact {
@@ -128,6 +138,18 @@ export const api = {
 
   getMyNames: () =>
     request<{ names: Array<{ name: string; pubkey: string; timestamp: number; is_mine: boolean }> }>('/names/mine').then(r => r.names),
+
+  getUnreadCount: (folder = 'inbox') =>
+    request<{ count: number }>(`/messages/unread-count?folder=${folder}`).then(r => r.count),
+
+  searchMessages: (query: string) =>
+    request<{ messages: Message[] }>(`/messages/search?q=${encodeURIComponent(query)}`).then(r => r.messages),
+
+  getThread: (id: string) =>
+    request<{ messages: Message[] }>(`/messages/thread/${id}`).then(r => r.messages),
+
+  listUsers: () =>
+    request<{ users: User[] }>('/users').then(r => r.users),
 
   // Auth endpoints (multi-tenant mode).
   signup: (username: string, password: string, email?: string) =>

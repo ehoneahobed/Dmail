@@ -40,6 +40,9 @@ type statusResponse struct {
 func (d *Daemon) NewHTTPHandler() http.Handler {
 	mux := http.NewServeMux()
 
+	mux.HandleFunc("GET /api/v1/messages/unread-count", d.handleUnreadCount)
+	mux.HandleFunc("GET /api/v1/messages/search", d.handleSearchMessages)
+	mux.HandleFunc("GET /api/v1/messages/thread/{id}", d.handleGetThread)
 	mux.HandleFunc("GET /api/v1/messages", d.handleListMessages)
 	mux.HandleFunc("GET /api/v1/messages/{id}", d.handleGetMessage)
 	mux.HandleFunc("POST /api/v1/messages/send", d.handleSendMessage)
@@ -262,6 +265,49 @@ func (d *Daemon) handleMyNames(w http.ResponseWriter, r *http.Request) {
 		entries = []store.NameEntry{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"names": entries})
+}
+
+func (d *Daemon) handleUnreadCount(w http.ResponseWriter, r *http.Request) {
+	folder := r.URL.Query().Get("folder")
+	if folder == "" {
+		folder = "inbox"
+	}
+	count, err := d.Store.CountUnread(folder)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"count": count})
+}
+
+func (d *Daemon) handleSearchMessages(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query().Get("q")
+	if q == "" {
+		writeJSON(w, http.StatusOK, map[string]any{"messages": []store.Message{}})
+		return
+	}
+	msgs, err := d.Store.SearchMessages(q, 50)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if msgs == nil {
+		msgs = []store.Message{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"messages": msgs})
+}
+
+func (d *Daemon) handleGetThread(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	msgs, err := d.Store.GetThread(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if msgs == nil {
+		msgs = []store.Message{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"messages": msgs})
 }
 
 func dmcryptoAddr(d *Daemon) string {

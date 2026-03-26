@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { api, Message } from '../api'
+import Avatar from '../components/Avatar'
+import MarkdownRenderer from '../components/MarkdownRenderer'
+import DeliveryStatus from '../components/DeliveryStatus'
 
 interface Props {
   resolveName: (pubkey: string) => string
@@ -51,13 +54,27 @@ export default function MessageDetail({ resolveName }: Props) {
       </button>
 
       <div className="meta">
-        <p>From: <strong>{resolveName(message.sender)}</strong></p>
-        <p>To: <strong>{resolveName(message.recipient)}</strong></p>
-        <p>{date.toLocaleString()}</p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
+          <Avatar address={message.sender} size={40} />
+          <div>
+            <p>From: <strong>{resolveName(message.sender)}</strong></p>
+            <p>To: <strong>{resolveName(message.recipient)}</strong></p>
+          </div>
+        </div>
+        <p>
+          {date.toLocaleString()}
+          {message.status && (
+            <span style={{ marginLeft: '0.5rem' }}>
+              <DeliveryStatus status={message.status} />
+            </span>
+          )}
+        </p>
         <h2>{message.subject}</h2>
       </div>
 
-      <div className="body">{message.body}</div>
+      <div className="body">
+        <MarkdownRenderer content={message.body} />
+      </div>
 
       <div style={{ marginTop: '2rem', display: 'flex', gap: '0.5rem' }}>
         <button
@@ -66,6 +83,14 @@ export default function MessageDetail({ resolveName }: Props) {
         >
           Reply
         </button>
+        {message.thread_id && (
+          <button
+            className="secondary"
+            onClick={() => navigate(`/thread/${message.thread_id}`)}
+          >
+            View Thread
+          </button>
+        )}
         <button
           className="danger"
           onClick={async () => {

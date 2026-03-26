@@ -204,11 +204,17 @@ func (s *Store) MarkPacketProcessed(id int64) error {
 
 // SaveMessageForUser inserts a user-scoped message.
 func (s *Store) SaveMessageForUser(userID string, m *Message) error {
+	if m.ThreadID == "" && m.ReplyToID != "" {
+		m.ThreadID = m.ReplyToID
+	}
+	if m.ThreadID == "" {
+		m.ThreadID = m.ID
+	}
 	_, err := s.db.Exec(
-		`INSERT OR REPLACE INTO messages (id, folder, sender_pubkey, recipient_pubkey, subject, body, timestamp, is_read)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT OR REPLACE INTO messages (id, folder, sender_pubkey, recipient_pubkey, subject, body, timestamp, is_read, reply_to_id, thread_id, status)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		fmt.Sprintf("%s:%s", userID, m.ID), m.Folder, m.SenderPubkey, m.RecipientPubkey,
-		m.Subject, m.Body, m.Timestamp, m.IsRead,
+		m.Subject, m.Body, m.Timestamp, m.IsRead, m.ReplyToID, m.ThreadID, m.Status,
 	)
 	return err
 }
@@ -217,7 +223,7 @@ func (s *Store) SaveMessageForUser(userID string, m *Message) error {
 // The returned message IDs have the userID: prefix stripped so the frontend gets clean IDs.
 func (s *Store) ListMessagesForUser(userID, folder string) ([]Message, error) {
 	rows, err := s.db.Query(
-		`SELECT id, folder, sender_pubkey, recipient_pubkey, subject, body, timestamp, is_read
+		`SELECT id, folder, sender_pubkey, recipient_pubkey, subject, body, timestamp, is_read, reply_to_id, thread_id, status
 		 FROM messages WHERE id LIKE ? AND folder = ? ORDER BY timestamp DESC`,
 		userID+":%", folder,
 	)
@@ -230,7 +236,7 @@ func (s *Store) ListMessagesForUser(userID, folder string) ([]Message, error) {
 	var msgs []Message
 	for rows.Next() {
 		var m Message
-		if err := rows.Scan(&m.ID, &m.Folder, &m.SenderPubkey, &m.RecipientPubkey, &m.Subject, &m.Body, &m.Timestamp, &m.IsRead); err != nil {
+		if err := rows.Scan(&m.ID, &m.Folder, &m.SenderPubkey, &m.RecipientPubkey, &m.Subject, &m.Body, &m.Timestamp, &m.IsRead, &m.ReplyToID, &m.ThreadID, &m.Status); err != nil {
 			return nil, err
 		}
 		// Strip the userID: prefix so the frontend gets clean IDs.
@@ -240,4 +246,94 @@ func (s *Store) ListMessagesForUser(userID, folder string) ([]Message, error) {
 		msgs = append(msgs, m)
 	}
 	return msgs, rows.Err()
+}
+
+// CountUnreadForUser returns unread message count for a user in a folder.
+func (s *Store) CountUnreadForUser(userID, folder string) (int, error) {
+	var count int
+	err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM messages WHERE id LIKE ? AND folder = ? AND is_read = 0`,
+		userID+":%", folder,
+	).Scan(&count)
+	return count, err
+}
+
+// SearchMessagesForUser performs full-text search scoped to a user.
+func (s *Store) SearchMessagesForUser(userID, query string, limit int) ([]Message, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.db.Query(
+		`SELECT m.id, m.folder, m.sender_pubkey, m.recipient_pubkey, m.subject, m.body, m.timestamp, m.is_read, m.reply_to_id, m.thread_id, m.status
+		 FROM messages m
+		 JOIN messages_fts f ON m.id = f.id
+		 WHERE messages_fts MATCH ? AND m.id LIKE ?
+		 ORDER BY m.timestamp DESC LIMIT ?`,
+		query, userID+":%", limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	prefix := userID + ":"
+	var msgs []Message
+	for rows.Next() {
+		var m Message
+		if err := rows.Scan(&m.ID, &m.Folder, &m.SenderPubkey, &m.RecipientPubkey, &m.Subject, &m.Body, &m.Timestamp, &m.IsRead, &m.ReplyToID, &m.ThreadID, &m.Status); err != nil {
+			return nil, err
+		}
+		if strings.HasPrefix(m.ID, prefix) {
+			m.ID = m.ID[len(prefix):]
+		}
+		msgs = append(msgs, m)
+	}
+	return msgs, rows.Err()
+}
+
+// GetThreadForUser returns all messages in a thread for a user.
+func (s *Store) GetThreadForUser(userID, messageID string) ([]Message, error) {
+	scopedID := userID + ":" + messageID
+	var threadID string
+	err := s.db.QueryRow(`SELECT thread_id FROM messages WHERE id = ?`, scopedID).Scan(&threadID)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if threadID == "" {
+		threadID = messageID
+	}
+
+	rows, err := s.db.Query(
+		`SELECT id, folder, sender_pubkey, recipient_pubkey, subject, body, timestamp, is_read, reply_to_id, thread_id, status
+		 FROM messages WHERE id LIKE ? AND thread_id = ? ORDER BY timestamp ASC`,
+		userID+":%", threadID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	prefix := userID + ":"
+	var msgs []Message
+	for rows.Next() {
+		var m Message
+		if err := rows.Scan(&m.ID, &m.Folder, &m.SenderPubkey, &m.RecipientPubkey, &m.Subject, &m.Body, &m.Timestamp, &m.IsRead, &m.ReplyToID, &m.ThreadID, &m.Status); err != nil {
+			return nil, err
+		}
+		if strings.HasPrefix(m.ID, prefix) {
+			m.ID = m.ID[len(prefix):]
+		}
+		msgs = append(msgs, m)
+	}
+	return msgs, rows.Err()
+}
+
+// UpdateMessageStatusForUser updates the delivery status of a user-scoped message.
+func (s *Store) UpdateMessageStatusForUser(userID, messageID, status string) error {
+	scopedID := userID + ":" + messageID
+	_, err := s.db.Exec(`UPDATE messages SET status = ? WHERE id = ?`, status, scopedID)
+	return err
 }

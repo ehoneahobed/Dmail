@@ -127,6 +127,8 @@ func (d *MultiTenantDaemon) SendMessageForUser(ctx context.Context, userID, reci
 		Body:            body,
 		Timestamp:       now,
 		IsRead:          true,
+		ReplyToID:       replyToID,
+		Status:          "sending",
 	}
 	d.Store.SaveMessageForUser(userID, sentMsg)
 
@@ -142,8 +144,11 @@ func (d *MultiTenantDaemon) SendMessageForUser(ctx context.Context, userID, reci
 			Body:            body,
 			Timestamp:       now,
 			IsRead:          false,
+			ReplyToID:       replyToID,
 		}
 		d.Store.SaveMessageForUser(localRecipient.ID, inboxMsg)
+		// Mark sender's copy as delivered.
+		d.Store.UpdateMessageStatusForUser(userID, msgID, "delivered")
 		log.Printf("message delivered locally from user %s to user %s", userID, localRecipient.ID)
 		return nil
 	}
@@ -165,6 +170,8 @@ func (d *MultiTenantDaemon) SendMessageForUser(ctx context.Context, userID, reci
 			log.Printf("ERROR push to DHT for user %s: %v", userID, err)
 			return
 		}
+		// Update status to sent after DHT push.
+		d.Store.UpdateMessageStatusForUser(userID, msgID, "sent")
 		log.Printf("message sent via DHT for user %s to %s", userID, recipientAddr)
 	}()
 
