@@ -113,6 +113,42 @@ func (d *MultiTenantDaemon) SendMessageForUser(ctx context.Context, userID, reci
 		PrivateKey: session.PrivateKey,
 	}
 
+	senderAddr := dmcrypto.Address(kp.PublicKey)
+	msgID := fmt.Sprintf("msg-%d", time.Now().UnixNano())
+	now := time.Now().Unix()
+
+	// Save sent copy for sender immediately.
+	sentMsg := &store.Message{
+		ID:              msgID,
+		Folder:          "sent",
+		SenderPubkey:    senderAddr,
+		RecipientPubkey: recipientAddr,
+		Subject:         subject,
+		Body:            body,
+		Timestamp:       now,
+		IsRead:          true,
+	}
+	d.Store.SaveMessageForUser(userID, sentMsg)
+
+	// Check if recipient is a local user — deliver directly without DHT.
+	localRecipient, _ := d.Store.GetUserByPubkey(recipientAddr)
+	if localRecipient != nil {
+		inboxMsg := &store.Message{
+			ID:              msgID,
+			Folder:          "inbox",
+			SenderPubkey:    senderAddr,
+			RecipientPubkey: recipientAddr,
+			Subject:         subject,
+			Body:            body,
+			Timestamp:       now,
+			IsRead:          false,
+		}
+		d.Store.SaveMessageForUser(localRecipient.ID, inboxMsg)
+		log.Printf("message delivered locally from user %s to user %s", userID, localRecipient.ID)
+		return nil
+	}
+
+	// Remote recipient — build encrypted packet and push to DHT.
 	d.pendingPoW.Add(1)
 	d.wg.Add(1)
 	go func() {
@@ -125,29 +161,11 @@ func (d *MultiTenantDaemon) SendMessageForUser(ctx context.Context, userID, reci
 			return
 		}
 
-		// Store sent message.
-		payload, _ := packet.Decrypt(pkt, kp.PrivateKey)
-		msg := &store.Message{
-			Folder:          "sent",
-			SenderPubkey:    dmcrypto.Address(kp.PublicKey),
-			RecipientPubkey: recipientAddr,
-			Subject:         subject,
-			Body:            body,
-			Timestamp:       time.Now().Unix(),
-			IsRead:          true,
-		}
-		if payload != nil {
-			msg.ID = payload.MessageId
-		} else {
-			msg.ID = fmt.Sprintf("sent-%d", time.Now().UnixNano())
-		}
-		d.Store.SaveMessageForUser(userID, msg)
-
 		if err := d.Node.Push(ctx, pkt); err != nil {
 			log.Printf("ERROR push to DHT for user %s: %v", userID, err)
 			return
 		}
-		log.Printf("message sent for user %s to %s", userID, recipientAddr)
+		log.Printf("message sent via DHT for user %s to %s", userID, recipientAddr)
 	}()
 
 	return nil

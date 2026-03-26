@@ -94,6 +94,21 @@ func (s *Store) GetUserByUsername(username string) (*User, error) {
 	return u, err
 }
 
+// GetUserByPubkey finds a user by their public key address.
+func (s *Store) GetUserByPubkey(pubkey string) (*User, error) {
+	u := &User{}
+	err := s.db.QueryRow(
+		`SELECT id, username, email, password_hash, password_salt, pubkey, encrypted_privkey, encrypted_key_salt, encrypted_key_nonce, created_at
+		 FROM users WHERE pubkey = ?`, pubkey,
+	).Scan(&u.ID, &u.Username, &u.Email, &u.PasswordHash, &u.PasswordSalt,
+		&u.Pubkey, &u.EncryptedPrivkey, &u.EncryptedKeySalt, &u.EncryptedKeyNonce,
+		&u.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return u, err
+}
+
 // GetUserByID finds a user by ID.
 func (s *Store) GetUserByID(id string) (*User, error) {
 	u := &User{}
