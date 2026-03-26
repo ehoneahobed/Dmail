@@ -39,7 +39,7 @@ export default function MessageDetail({ resolveName }: Props) {
 
   if (!message) {
     return (
-      <div className="empty-state">
+      <div className="empty-state-card">
         <div className="spinner" style={{ margin: '0 auto' }} />
       </div>
     )
@@ -50,56 +50,58 @@ export default function MessageDetail({ resolveName }: Props) {
   return (
     <div className="message-detail">
       <button className="secondary" onClick={() => navigate(-1)} style={{ marginBottom: '1rem' }}>
-        Back
+        &larr; Back
       </button>
 
-      <div className="meta">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
-          <Avatar address={message.sender} size={40} />
-          <div>
-            <p>From: <strong>{resolveName(message.sender)}</strong></p>
-            <p>To: <strong>{resolveName(message.recipient)}</strong></p>
+      <div className="card">
+        <div className="meta">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
+            <Avatar address={message.sender} size={40} />
+            <div>
+              <p>From: <strong>{resolveName(message.sender)}</strong></p>
+              <p>To: <strong>{resolveName(message.recipient)}</strong></p>
+            </div>
           </div>
+          <p>
+            {date.toLocaleString()}
+            {message.status && (
+              <span style={{ marginLeft: '0.5rem' }}>
+                <DeliveryStatus status={message.status} />
+              </span>
+            )}
+          </p>
+          <h2>{message.subject}</h2>
         </div>
-        <p>
-          {date.toLocaleString()}
-          {message.status && (
-            <span style={{ marginLeft: '0.5rem' }}>
-              <DeliveryStatus status={message.status} />
-            </span>
-          )}
-        </p>
-        <h2>{message.subject}</h2>
-      </div>
 
-      <div className="body">
-        <MarkdownRenderer content={message.body} />
-      </div>
+        <div className="body">
+          <MarkdownRenderer content={message.body} />
+        </div>
 
-      <div style={{ marginTop: '2rem', display: 'flex', gap: '0.5rem' }}>
-        <button
-          className="primary"
-          onClick={() => navigate(`/compose?reply=${message.id}&to=${encodeURIComponent(message.sender)}`)}
-        >
-          Reply
-        </button>
-        {message.thread_id && (
+        <div style={{ marginTop: '1.5rem', paddingTop: '1rem', borderTop: '1px solid var(--border)', display: 'flex', gap: '0.5rem' }}>
           <button
-            className="secondary"
-            onClick={() => navigate(`/thread/${message.thread_id}`)}
+            className="primary"
+            onClick={() => navigate(`/compose?reply=${message.id}&to=${encodeURIComponent(message.sender)}`)}
           >
-            View Thread
+            Reply
           </button>
-        )}
-        <button
-          className="danger"
-          onClick={async () => {
-            await api.deleteMessage(message.id)
-            navigate(-1)
-          }}
-        >
-          Delete
-        </button>
+          {message.thread_id && (
+            <button
+              className="secondary"
+              onClick={() => navigate(`/thread/${message.thread_id}`)}
+            >
+              View Thread
+            </button>
+          )}
+          <button
+            className="danger"
+            onClick={async () => {
+              await api.deleteMessage(message.id)
+              navigate(-1)
+            }}
+          >
+            Delete
+          </button>
+        </div>
       </div>
     </div>
   )

@@ -6,14 +6,13 @@ import Avatar from '../components/Avatar'
 export default function UserDirectory() {
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
   const navigate = useNavigate()
 
   useEffect(() => {
     api
       .listUsers()
       .then(setUsers)
-      .catch(e => setError(e.message))
+      .catch(() => setUsers([]))
       .finally(() => setLoading(false))
   }, [])
 
@@ -23,25 +22,25 @@ export default function UserDirectory() {
         <h2>User Directory</h2>
       </div>
 
-      {error && <div className="error-banner">{error}</div>}
-
       {loading ? (
-        <div className="empty-state">
+        <div className="empty-state-card">
           <div className="spinner" style={{ margin: '0 auto' }} />
         </div>
       ) : users.length === 0 ? (
-        <div className="empty-state">
-          <p>No users registered yet.</p>
+        <div className="empty-state-card">
+          <div className="empty-icon">&#128101;</div>
+          <h3>No users yet</h3>
+          <p>Users who sign up on this server will appear here.</p>
         </div>
       ) : (
-        <ul className="contacts-list">
+        <div className="card-list">
           {users.map(u => (
-            <li key={u.id} className="contact-item">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                <Avatar address={u.pubkey} size={36} />
-                <div>
-                  <div className="name">{u.username}</div>
-                  <div className="key">{u.pubkey}</div>
+            <div key={u.id} className="card-list-item">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flex: 1, minWidth: 0 }}>
+                <Avatar address={u.pubkey} size={40} />
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{u.username}</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.pubkey}</div>
                 </div>
               </div>
               <button
@@ -50,9 +49,9 @@ export default function UserDirectory() {
               >
                 Message
               </button>
-            </li>
+            </div>
           ))}
-        </ul>
+        </div>
       )}
     </div>
   )

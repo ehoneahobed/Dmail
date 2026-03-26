@@ -31,51 +31,51 @@ export default function Login({ onLogin }: Props) {
   }
 
   return (
-    <div className="onboarding">
-      <h1>Dmail</h1>
-      <p className="subtitle">Sign in to your account</p>
-
-      {error && <div className="error-banner" style={{ maxWidth: 400, marginBottom: '1rem' }}>{error}</div>}
-
-      <form onSubmit={handleSubmit} style={{ width: '100%', maxWidth: 400 }}>
-        <div className="field" style={{ marginBottom: '1rem' }}>
-          <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>
-            Username
-          </label>
-          <input
-            type="text"
-            value={username}
-            onChange={e => setUsername(e.target.value)}
-            placeholder="username"
-            autoFocus
-          />
+    <div className="auth-page">
+      <div className="auth-card">
+        <div className="auth-header">
+          <h1>Dmail</h1>
+          <p>Encrypted peer-to-peer messaging</p>
         </div>
-        <div className="field" style={{ marginBottom: '1.5rem' }}>
-          <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>
-            Password
-          </label>
-          <input
-            type="password"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            placeholder="password"
-          />
-        </div>
-        <button className="primary" type="submit" disabled={!username || !password || loading} style={{ width: '100%' }}>
-          {loading ? 'Signing in...' : 'Sign In'}
-        </button>
-      </form>
 
-      <p style={{ marginTop: '1.5rem', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-        Don't have an account?{' '}
-        <a
-          href="#"
-          onClick={e => { e.preventDefault(); navigate('/signup') }}
-          style={{ color: 'var(--accent)' }}
-        >
-          Sign up
-        </a>
-      </p>
+        {error && <div className="error-banner">{error}</div>}
+
+        <form onSubmit={handleSubmit}>
+          <div className="field" style={{ marginBottom: '1rem' }}>
+            <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>
+              Username
+            </label>
+            <input
+              type="text"
+              value={username}
+              onChange={e => setUsername(e.target.value)}
+              placeholder="Enter your username"
+              autoFocus
+            />
+          </div>
+          <div className="field" style={{ marginBottom: '1.5rem' }}>
+            <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>
+              Password
+            </label>
+            <input
+              type="password"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              placeholder="Enter your password"
+            />
+          </div>
+          <button className="primary" type="submit" disabled={!username || !password || loading} style={{ width: '100%' }}>
+            {loading ? 'Signing in...' : 'Sign In'}
+          </button>
+        </form>
+
+        <div className="auth-footer">
+          Don't have an account?{' '}
+          <a href="#" onClick={e => { e.preventDefault(); navigate('/signup') }}>
+            Create one
+          </a>
+        </div>
+      </div>
     </div>
   )
 }

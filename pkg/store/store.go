@@ -75,7 +75,6 @@ func (s *Store) migrate() error {
 	);
 	CREATE INDEX IF NOT EXISTS idx_messages_folder ON messages(folder);
 	CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
-	CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(thread_id);
 
 	CREATE TABLE IF NOT EXISTS contacts (
 		pubkey TEXT PRIMARY KEY,
@@ -109,6 +108,9 @@ func (s *Store) migrate() error {
 	for _, q := range alters {
 		s.db.Exec(q) // ignore errors — column may already exist
 	}
+
+	// Create index on thread_id (after ALTER TABLE ensures column exists).
+	s.db.Exec("CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(thread_id)")
 
 	// Create FTS5 virtual table for full-text search.
 	fts := `

@@ -65,12 +65,14 @@ export default function Inbox({ folder, resolveName }: Props) {
       {error && <div className="error-banner">{error}</div>}
 
       {loading ? (
-        <div className="empty-state">
+        <div className="empty-state-card">
           <div className="spinner" style={{ margin: '0 auto' }} />
         </div>
       ) : displayMessages.length === 0 ? (
-        <div className="empty-state">
-          <p>{searchResults !== null ? 'No results found.' : `No messages in ${folder}.`}</p>
+        <div className="empty-state-card">
+          <div className="empty-icon">{searchResults !== null ? '\uD83D\uDD0D' : '\u2709'}</div>
+          <h3>{searchResults !== null ? 'No results found' : `No messages in ${folder}`}</h3>
+          <p>{searchResults !== null ? 'Try a different search term.' : folder === 'inbox' ? 'Messages you receive will appear here.' : 'Messages you send will appear here.'}</p>
         </div>
       ) : (
         <ul className="message-list">
