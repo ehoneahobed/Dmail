@@ -1,0 +1,13 @@
+services:
+  dmail:
+    build: .
+    ports:
+      - "7777:7777"
+    volumes:
+      - dmail-data:/data
+    environment:
+      - JWT_SECRET=${JWT_SECRET:-change-me-in-production-use-a-long-random-string}
+    restart: unless-stopped
+
+volumes:
+  dmail-data:
