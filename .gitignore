@@ -1,6 +1,6 @@
-# Go binary
-dmaild
-dmaild.exe
+# Go binary (root only, not cmd/dmaild/)
+/dmaild
+/dmaild.exe
 
 # Go build cache
 *.test
