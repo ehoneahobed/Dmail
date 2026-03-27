@@ -47,6 +47,11 @@ func (d *MultiTenantDaemon) NewMultiTenantHTTPHandler(staticDir string) http.Han
 	// Status is public (used for health checks and auth detection).
 	mux.HandleFunc("GET /api/v1/status", d.handleMTStatus)
 
+	// Federation endpoints (public, no JWT).
+	mux.HandleFunc("GET /.well-known/dmail", d.handleWellKnown)
+	mux.HandleFunc("GET /api/v1/federation/resolve", d.handleFederationResolve)
+	mux.HandleFunc("POST /api/v1/federation/deliver", d.handleFederationDeliver)
+
 	// Protected endpoints.
 	mux.HandleFunc("GET /api/v1/messages/unread-count", d.requireAuth(d.handleMTUnreadCount))
 	mux.HandleFunc("GET /api/v1/messages/search", d.requireAuth(d.handleMTSearchMessages))
@@ -342,6 +347,17 @@ func (d *MultiTenantDaemon) handleMTSendMessage(w http.ResponseWriter, r *http.R
 	}
 
 	recipient := req.Recipient
+
+	// Check for federated address (user@host) first.
+	if username, host := parseFederatedAddress(recipient); username != "" {
+		if err := d.SendMessageFederated(r.Context(), userID, username, host, req.Subject, req.Body, req.ReplyToID); err != nil {
+			writeError(w, http.StatusBadRequest, "federation: "+err.Error())
+			return
+		}
+		writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted"})
+		return
+	}
+
 	if strings.HasSuffix(recipient, ".dmail") {
 		addr, err := d.ResolveNameForUser(r.Context(), recipient)
 		if err != nil {

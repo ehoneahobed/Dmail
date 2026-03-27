@@ -127,6 +127,11 @@ func main() {
 		handler = md.NewMultiTenantHTTPHandler(*staticDir)
 		closer = md.Close
 		log.Println("Running in multi-tenant web service mode")
+		if serverURL := os.Getenv("DMAIL_SERVER_URL"); serverURL != "" {
+			log.Printf("Federation enabled: %s", serverURL)
+		} else {
+			log.Println("Federation disabled (set DMAIL_SERVER_URL to enable)")
+		}
 	} else {
 		// Single-user mode (desktop / CLI).
 		d, err := daemon.New(ctx, daemon.Config{

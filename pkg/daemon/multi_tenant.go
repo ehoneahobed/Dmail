@@ -18,6 +18,8 @@ import (
 	"github.com/ehoneahobed/dmail/pkg/pow"
 	"github.com/ehoneahobed/dmail/pkg/store"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
@@ -173,6 +175,90 @@ func (d *MultiTenantDaemon) SendMessageForUser(ctx context.Context, userID, reci
 		// Update status to sent after DHT push.
 		d.Store.UpdateMessageStatusForUser(userID, msgID, "sent")
 		log.Printf("message sent via DHT for user %s to %s", userID, recipientAddr)
+	}()
+
+	return nil
+}
+
+// SendMessageFederated sends a message to a user on a remote federated server.
+func (d *MultiTenantDaemon) SendMessageFederated(ctx context.Context, userID, username, host, subject, body, replyToID string) error {
+	session := d.Sessions.Get(userID)
+	if session == nil {
+		return fmt.Errorf("session expired, please login again")
+	}
+
+	// Resolve the remote user's pubkey via federation.
+	recipientAddr, err := resolveViaFederation(ctx, username, host)
+	if err != nil {
+		return fmt.Errorf("resolve %s@%s: %w", username, host, err)
+	}
+
+	recipientPub, err := dmcrypto.PubKeyFromAddress(recipientAddr)
+	if err != nil {
+		return fmt.Errorf("invalid recipient pubkey from remote: %w", err)
+	}
+
+	kp := &dmcrypto.KeyPair{
+		PublicKey:  session.PublicKey,
+		PrivateKey: session.PrivateKey,
+	}
+
+	senderAddr := dmcrypto.Address(kp.PublicKey)
+	msgID := fmt.Sprintf("msg-%d", time.Now().UnixNano())
+	now := time.Now().Unix()
+
+	// Save sent copy for sender immediately.
+	sentMsg := &store.Message{
+		ID:              msgID,
+		Folder:          "sent",
+		SenderPubkey:    senderAddr,
+		RecipientPubkey: recipientAddr,
+		Subject:         subject,
+		Body:            body,
+		Timestamp:       now,
+		IsRead:          true,
+		ReplyToID:       replyToID,
+		Status:          "sending",
+	}
+	d.Store.SaveMessageForUser(userID, sentMsg)
+
+	// Build and deliver in background (PoW takes time).
+	d.pendingPoW.Add(1)
+	d.wg.Add(1)
+	go func() {
+		defer d.wg.Done()
+		defer d.pendingPoW.Add(-1)
+
+		pkt, err := packet.Build(subject, body, replyToID, kp, recipientPub, pow.DefaultDifficulty)
+		if err != nil {
+			log.Printf("ERROR build packet for federated send: %v", err)
+			return
+		}
+
+		pktData, err := proto.Marshal(pkt)
+		if err != nil {
+			log.Printf("ERROR marshal packet for federated send: %v", err)
+			return
+		}
+
+		// Try federation delivery first.
+		deliverCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		if err := deliverViaFederation(deliverCtx, host, pktData); err != nil {
+			// Fall back to DHT push.
+			log.Printf("WARNING federation delivery to %s failed (%v), falling back to DHT", host, err)
+			if dhtErr := d.Node.Push(context.Background(), pkt); dhtErr != nil {
+				log.Printf("ERROR DHT fallback also failed for user %s: %v", userID, dhtErr)
+				return
+			}
+			d.Store.UpdateMessageStatusForUser(userID, msgID, "sent")
+			log.Printf("message sent via DHT fallback for user %s to %s@%s", userID, username, host)
+			return
+		}
+
+		d.Store.UpdateMessageStatusForUser(userID, msgID, "delivered")
+		log.Printf("message delivered via federation for user %s to %s@%s", userID, username, host)
 	}()
 
 	return nil

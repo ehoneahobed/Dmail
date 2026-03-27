@@ -30,7 +30,8 @@ export default function Compose({ contacts, identity }: Props) {
     }
   }, [replyId])
 
-  const isValidAddress = recipient.startsWith('dmail:') && recipient.length > 20
+  const isFederatedAddress = /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(recipient)
+  const isValidAddress = (recipient.startsWith('dmail:') && recipient.length > 20) || isFederatedAddress
 
   const matchedContact = contacts.find(
     c => c.petname.toLowerCase() === recipient.toLowerCase(),
@@ -114,7 +115,7 @@ export default function Compose({ contacts, identity }: Props) {
           </label>
           <input
             type="text"
-            placeholder="alice.dmail, dmail:abc123..., or contact name"
+            placeholder="alice@server.com, alice.dmail, or contact name"
             value={recipient}
             onChange={e => setRecipient(e.target.value)}
             list="contacts-list"
@@ -134,6 +135,11 @@ export default function Compose({ contacts, identity }: Props) {
           )}
           {resolvedDmailName && !resolving && (
             <p className="field-hint field-hint-success">Resolved: {resolvedDmailName}</p>
+          )}
+          {isFederatedAddress && (
+            <p className="field-hint field-hint-success">
+              Federation: will deliver to {recipient.split('@')[1]}
+            </p>
           )}
         </div>
 
